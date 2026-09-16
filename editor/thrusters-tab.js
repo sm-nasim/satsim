@@ -1,6 +1,7 @@
 //thrusters-tab.js
 import * as THREE from 'three';
 import { FeatureManager } from './featureManager.js';
+import { CONTROL_COMMANDS } from '../controlBindings.js';
 
 // Auto-binding tolerances
 const TRANSLATION_ANGLE_DEGREES = 90-15;
@@ -98,13 +99,13 @@ export class ThrustersTab extends FeatureManager {
         // Translation: thruster points mostly along one axis
         const dot = (a, b) => a.dot(b);
         if (Math.abs(dot(dir, new THREE.Vector3(0, 0, 1))) > TRANSLATION_TOLERANCE) {
-            keys.push(dir.z > 0 ? 'w' : 's');
+            keys.push(dir.z > 0 ? CONTROL_COMMANDS.translatePositiveZ : CONTROL_COMMANDS.translateNegativeZ);
         }
         if (Math.abs(dot(dir, new THREE.Vector3(1, 0, 0))) > TRANSLATION_TOLERANCE) {
-            keys.push(dir.x > 0 ? 'a' : 'd');
+            keys.push(dir.x > 0 ? CONTROL_COMMANDS.translatePositiveX : CONTROL_COMMANDS.translateNegativeX);
         }
         if (Math.abs(dot(dir, new THREE.Vector3(0, 1, 0))) > TRANSLATION_TOLERANCE) {
-            keys.push(dir.y > 0 ? 'e' : 'q');
+            keys.push(dir.y > 0 ? CONTROL_COMMANDS.translatePositiveY : CONTROL_COMMANDS.translateNegativeY);
         }
         
         // Rotation: torque = r × F  (lever arm × direction)
@@ -112,17 +113,17 @@ export class ThrustersTab extends FeatureManager {
 
         // Pitch (rotation around X axis)
         if (Math.abs(torque.x) > 0.025) {
-            keys.push(torque.x > 0 ? 'k' : 'i'); // pitch up/down
+            keys.push(torque.x > 0 ? CONTROL_COMMANDS.pitchPositive : CONTROL_COMMANDS.pitchNegative); // pitch up/down
         }
 
         // Yaw (rotation around Y axis)
         if (Math.abs(torque.y) > 0.025) {
-            keys.push(torque.y > 0 ? 'j' : 'l'); // yaw left/right
+            keys.push(torque.y > 0 ? CONTROL_COMMANDS.yawPositive : CONTROL_COMMANDS.yawNegative); // yaw left/right
         }
 
         // Roll (rotation around Z axis)
         if (Math.abs(torque.z) > 0.025) {
-            keys.push(torque.z > 0 ? 'o' : 'u'); // roll left/right
+            keys.push(torque.z > 0 ? CONTROL_COMMANDS.rollPositive : CONTROL_COMMANDS.rollNegative); // roll left/right
         }
         
         return keys; // Return array of keys

@@ -31,6 +31,20 @@ import { loadSpaceStation, setupLighting, addEyeChart } from './environmentSetup
 import { DockingManager } from './dockingManager.js';
 import { MissionClock } from './missionClock.js';
 import { SoundManager } from './soundManager.js';
+import {
+  CONTROL_ACTIONS,
+  CONTROL_COMMANDS,
+  CONTROL_COMMAND_KEYS,
+  TRANSLATION_COMMAND_KEYS,
+  clearSavedBindings,
+  findActionUsingKey,
+  formatPhysicalKey,
+  getCommandForPhysicalKey,
+  getDefaultBindings,
+  loadBindings,
+  normalizePhysicalKey,
+  saveBindings
+} from './controlBindings.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
@@ -83,6 +97,8 @@ function initSimulation() {
   let composer; // EffectComposer for post-processing (SSAO + FXAA)
   let fxaaPass; // FXAA anti-aliasing pass (needs resolution uniform updates on resize)
   let defaultProperties = null;
+  let controlBindings = loadBindings();
+  let pendingBindingActionId = null;
   
   let showDistanceInfo = false;
   let raycaster = new THREE.Raycaster();
@@ -247,7 +263,8 @@ function initSimulation() {
   addEyeChart(scene);
 
   let thrusters = [];
-  const keyToThrusterIndices = { w:[],s:[],a:[],d:[],q:[],e:[],i:[],k:[],j:[],l:[],u:[],o:[] };
+  const keyToThrusterIndices = Object.fromEntries(CONTROL_COMMAND_KEYS.map(command => [command, []]));
+  const translationCommands = new Set(TRANSLATION_COMMAND_KEYS);
   const userDisabledThrusterIndices = new Set();
   let highlightedThrusterIndex = null;
 
@@ -399,7 +416,144 @@ function initSimulation() {
   const keys = {};               
   let backtickPressed = false;
 
+  function clearManualControlState() {
+    Object.keys(keys).forEach(key => delete keys[key]);
+    fineControlKeys = {};
+    fineControlProcessedKeys = {};
+    fineControlKeyStartTimes = {};
+  }
+
+  function updateControlInstructions() {
+    const key = actionId => formatPhysicalKey(controlBindings[actionId]);
+    const translationText = document.getElementById('translation-controls-text');
+    const rotationText = document.getElementById('rotation-controls-text');
+    const cooperativeText = document.getElementById('controller-cooperative-controls');
+
+    if (translationText) {
+      translationText.textContent = `${key('translatePositiveZ')}/${key('translateNegativeZ')}: +Z/-Z | ${key('translatePositiveX')}/${key('translateNegativeX')}: +X/-X | ${key('translatePositiveY')}/${key('translateNegativeY')}: +Y/-Y`;
+    }
+    if (rotationText) {
+      rotationText.textContent = `${key('pitchPositive')}/${key('pitchNegative')}: +Pitch/-Pitch | ${key('yawPositive')}/${key('yawNegative')}: +Yaw/-Yaw | ${key('rollPositive')}/${key('rollNegative')}: +Roll/-Roll`;
+    }
+    if (cooperativeText) {
+      cooperativeText.textContent = CONTROL_ACTIONS.map(action => key(action.id)).join('/');
+    }
+  }
+
+  function setControlsMessage(message, isWarning = false) {
+    const messageElement = document.getElementById('controls-binding-message');
+    if (!messageElement) return;
+    messageElement.textContent = message;
+    messageElement.classList.toggle('warning', isWarning);
+  }
+
+  function renderControlsPanel() {
+    const list = document.getElementById('controls-binding-list');
+    if (!list) return;
+    list.innerHTML = '';
+
+    CONTROL_ACTIONS.forEach(action => {
+      const row = document.createElement('div');
+      row.className = 'controls-binding-row';
+
+      const label = document.createElement('span');
+      label.textContent = action.label;
+
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.actionId = action.id;
+      button.textContent = pendingBindingActionId === action.id
+        ? 'Press a key...'
+        : formatPhysicalKey(controlBindings[action.id]);
+      button.classList.toggle('listening', pendingBindingActionId === action.id);
+      button.addEventListener('click', () => {
+        pendingBindingActionId = action.id;
+        setControlsMessage(`Choose a new key for ${action.label}. Press Escape to cancel.`);
+        renderControlsPanel();
+      });
+
+      row.appendChild(label);
+      row.appendChild(button);
+      list.appendChild(row);
+    });
+
+    updateControlInstructions();
+  }
+
+  function initializeControlsPanel() {
+    const openButton = document.getElementById('customize-controls-button');
+    const closeButton = document.getElementById('close-controls-panel');
+    const resetButton = document.getElementById('reset-controls-button');
+    const panel = document.getElementById('controls-panel');
+    if (!openButton || !closeButton || !resetButton || !panel) return;
+
+    openButton.addEventListener('click', () => {
+      panel.style.display = 'block';
+      setControlsMessage('Click a key assignment to change it.');
+      renderControlsPanel();
+    });
+    closeButton.addEventListener('click', () => {
+      pendingBindingActionId = null;
+      panel.style.display = 'none';
+      renderControlsPanel();
+    });
+    resetButton.addEventListener('click', () => {
+      controlBindings = getDefaultBindings();
+      pendingBindingActionId = null;
+      clearSavedBindings();
+      clearManualControlState();
+      setControlsMessage('Controls reset to defaults.');
+      renderControlsPanel();
+    });
+
+    renderControlsPanel();
+  }
+
+  function capturePendingBinding(event) {
+    if (!pendingBindingActionId) return false;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const physicalKey = normalizePhysicalKey(event.key);
+    if (physicalKey === 'escape') {
+      pendingBindingActionId = null;
+      setControlsMessage('Key assignment cancelled.');
+      renderControlsPanel();
+      return true;
+    }
+
+    const disallowedKeys = new Set(['`', ' ', 'capslock', 'shift', 'control', 'alt', 'meta', 'c', 't', 'v']);
+    if (!physicalKey || disallowedKeys.has(physicalKey)) {
+      setControlsMessage(`${formatPhysicalKey(physicalKey)} is reserved by the simulator. Choose another key.`, true);
+      pendingBindingActionId = null;
+      renderControlsPanel();
+      return true;
+    }
+
+    const duplicateAction = findActionUsingKey(controlBindings, physicalKey, pendingBindingActionId);
+    if (duplicateAction) {
+      setControlsMessage(`${formatPhysicalKey(physicalKey)} is already assigned to ${duplicateAction.label}. The old binding was kept.`, true);
+      pendingBindingActionId = null;
+      renderControlsPanel();
+      return true;
+    }
+
+    const action = CONTROL_ACTIONS.find(item => item.id === pendingBindingActionId);
+    controlBindings[pendingBindingActionId] = physicalKey;
+    pendingBindingActionId = null;
+    clearManualControlState();
+    const saved = saveBindings(controlBindings);
+    setControlsMessage(
+      `${action.label} is now assigned to ${formatPhysicalKey(physicalKey)}${saved ? '.' : ', but the browser could not save it.'}`,
+      !saved
+    );
+    renderControlsPanel();
+    return true;
+  }
+
   document.addEventListener('keydown', e => {
+    if (capturePendingBinding(e)) return;
+
     if (e.key === 'CapsLock') {
       fineControlMode = !fineControlMode;
       fineControlKeys = {};
@@ -407,21 +561,25 @@ function initSimulation() {
       return;
     }
     
-    const k = e.key.toLowerCase();
+    const k = normalizePhysicalKey(e.key);
     if (k === '`') backtickPressed = true;
-    
-    if (fineControlMode && ['w','s','a','d','q','e','i','k','j','l','u','o'].includes(k)) {
+
+    // Backtick shortcuts use the physical key. They take precedence over a
+    // customized movement binding while the modifier is held.
+    const command = backtickPressed ? null : getCommandForPhysicalKey(controlBindings, k);
+    if (fineControlMode && command) {
       e.preventDefault();
-      if (!fineControlProcessedKeys[k]) {
-        fineControlKeys[k] = true;
-        fineControlProcessedKeys[k] = true;
+      if (!fineControlProcessedKeys[command]) {
+        fineControlKeys[command] = true;
+        fineControlProcessedKeys[command] = true;
         // Record the start time for timed firing
-        if (timedFiringEnabled && !fineControlKeyStartTimes[k]) {
-          fineControlKeyStartTimes[k] = performance.now();
+        if (timedFiringEnabled && !fineControlKeyStartTimes[command]) {
+          fineControlKeyStartTimes[command] = performance.now();
         }
       }
-    } else {
-      keys[k] = true;
+    } else if (command) {
+      e.preventDefault();
+      keys[command] = true;
     }
 
     if (backtickPressed && k === 'r') resetSimulation();
@@ -511,14 +669,19 @@ function initSimulation() {
   });
 
   document.addEventListener('keyup', e => {
-    const k = e.key.toLowerCase();
+    const k = normalizePhysicalKey(e.key);
     if (k === '`') backtickPressed = false;
+    const command = getCommandForPhysicalKey(controlBindings, k);
+    if (!command) return;
     if (fineControlMode) {
-      delete fineControlProcessedKeys[k];
+      delete fineControlProcessedKeys[command];
     } else {
-      delete keys[k];
+      delete keys[command];
     }
   });
+
+  window.addEventListener('blur', clearManualControlState);
+  initializeControlsPanel();
 
   function stopEverything() {
     if (!satBody) return;
@@ -857,30 +1020,30 @@ function initSimulation() {
         
         if (fineControlMode) {
           // Swap I and K for CMGs
-          if (isCMGMode ? isKeyActive('k') : isKeyActive('i')) torque.x += torquePerAxis;
-          if (isCMGMode ? isKeyActive('i') : isKeyActive('k')) torque.x -= torquePerAxis;
+          if (isCMGMode ? isKeyActive(CONTROL_COMMANDS.pitchPositive) : isKeyActive(CONTROL_COMMANDS.pitchNegative)) torque.x += torquePerAxis;
+          if (isCMGMode ? isKeyActive(CONTROL_COMMANDS.pitchNegative) : isKeyActive(CONTROL_COMMANDS.pitchPositive)) torque.x -= torquePerAxis;
           // Swap J and L for CMGs
-          if (isCMGMode ? isKeyActive('j') : isKeyActive('l')) torque.y += torquePerAxis;
-          if (isCMGMode ? isKeyActive('l') : isKeyActive('j')) torque.y -= torquePerAxis;
+          if (isCMGMode ? isKeyActive(CONTROL_COMMANDS.yawPositive) : isKeyActive(CONTROL_COMMANDS.yawNegative)) torque.y += torquePerAxis;
+          if (isCMGMode ? isKeyActive(CONTROL_COMMANDS.yawNegative) : isKeyActive(CONTROL_COMMANDS.yawPositive)) torque.y -= torquePerAxis;
           // Swap U and O for CMGs
-          if (isCMGMode ? isKeyActive('o') : isKeyActive('u')) torque.z += torquePerAxis;
-          if (isCMGMode ? isKeyActive('u') : isKeyActive('o')) torque.z -= torquePerAxis;
+          if (isCMGMode ? isKeyActive(CONTROL_COMMANDS.rollPositive) : isKeyActive(CONTROL_COMMANDS.rollNegative)) torque.z += torquePerAxis;
+          if (isCMGMode ? isKeyActive(CONTROL_COMMANDS.rollNegative) : isKeyActive(CONTROL_COMMANDS.rollPositive)) torque.z -= torquePerAxis;
         } else {
           // Swap I and K for CMGs
-          if (isCMGMode ? isKeyActive('k') : isKeyActive('i')) torque.x += torquePerAxis;
-          if (isCMGMode ? isKeyActive('i') : isKeyActive('k')) torque.x -= torquePerAxis;
+          if (isCMGMode ? isKeyActive(CONTROL_COMMANDS.pitchPositive) : isKeyActive(CONTROL_COMMANDS.pitchNegative)) torque.x += torquePerAxis;
+          if (isCMGMode ? isKeyActive(CONTROL_COMMANDS.pitchNegative) : isKeyActive(CONTROL_COMMANDS.pitchPositive)) torque.x -= torquePerAxis;
           // Swap J and L for CMGs
-          if (isCMGMode ? isKeyActive('j') : isKeyActive('l')) torque.y += torquePerAxis;
-          if (isCMGMode ? isKeyActive('l') : isKeyActive('j')) torque.y -= torquePerAxis;
+          if (isCMGMode ? isKeyActive(CONTROL_COMMANDS.yawPositive) : isKeyActive(CONTROL_COMMANDS.yawNegative)) torque.y += torquePerAxis;
+          if (isCMGMode ? isKeyActive(CONTROL_COMMANDS.yawNegative) : isKeyActive(CONTROL_COMMANDS.yawPositive)) torque.y -= torquePerAxis;
           // Swap U and O for CMGs
-          if (isCMGMode ? isKeyActive('o') : isKeyActive('u')) torque.z += torquePerAxis;
-          if (isCMGMode ? isKeyActive('u') : isKeyActive('o')) torque.z -= torquePerAxis;
+          if (isCMGMode ? isKeyActive(CONTROL_COMMANDS.rollPositive) : isKeyActive(CONTROL_COMMANDS.rollNegative)) torque.z += torquePerAxis;
+          if (isCMGMode ? isKeyActive(CONTROL_COMMANDS.rollNegative) : isKeyActive(CONTROL_COMMANDS.rollPositive)) torque.z -= torquePerAxis;
         }
         if (torque.length() > 0) attitudeControl.applyControlTorque(torque);
       } else {
         Object.entries(keyToThrusterIndices).forEach(([key, indices]) => {
           const keyIsPressed = isKeyActive(key);
-          if (keyIsPressed && indices.length && !['w','s','a','d','q','e'].includes(key)) {
+          if (keyIsPressed && indices.length && !translationCommands.has(key)) {
             indices.forEach(i => {
               const t = thrusters[i]; if (!t) return;
               if (isThrusterDisabled(i)) { setThrusterActive(t, false); return; }
@@ -905,7 +1068,7 @@ function initSimulation() {
       
       Object.entries(keyToThrusterIndices).forEach(([key, indices]) => {
         const keyIsPressed = isKeyActive(key);
-        if (keyIsPressed && indices.length && ['w','s','a','d','q','e'].includes(key)) {
+        if (keyIsPressed && indices.length && translationCommands.has(key)) {
           indices.forEach(i => {
             const t = thrusters[i]; if (!t) return;
             if (isThrusterDisabled(i)) { setThrusterActive(t, false); return; }

@@ -1,5 +1,7 @@
 // File: thrusterSetup.js
 
+import { CONTROL_COMMANDS } from './controlBindings.js';
+
 // Auto-binding tolerances
 const TRANSLATION_ANGLE_DEGREES = 90-25;
 const TRANSLATION_TOLERANCE = Math.cos(TRANSLATION_ANGLE_DEGREES * Math.PI / 180);
@@ -103,9 +105,9 @@ function processThrusterConfig(config, CANNON, satMesh, keyToThrusterIndices, cr
     if (autoBind) {
       // Use auto-binding logic based on position and direction
       const dot = (a, b) => a.dot(b);
-      if (Math.abs(dot(dir, new CANNON.Vec3(0, 0, 1))) > TRANSLATION_TOLERANCE) keyToThrusterIndices[dir.z > 0 ? 'w' : 's'].push(i);
-      if (Math.abs(dot(dir, new CANNON.Vec3(1, 0, 0))) > TRANSLATION_TOLERANCE) keyToThrusterIndices[dir.x > 0 ? 'a' : 'd'].push(i);
-      if (Math.abs(dot(dir, new CANNON.Vec3(0, 1, 0))) > TRANSLATION_TOLERANCE) keyToThrusterIndices[dir.y > 0 ? 'e' : 'q'].push(i);
+      if (Math.abs(dot(dir, new CANNON.Vec3(0, 0, 1))) > TRANSLATION_TOLERANCE) keyToThrusterIndices[dir.z > 0 ? CONTROL_COMMANDS.translatePositiveZ : CONTROL_COMMANDS.translateNegativeZ].push(i);
+      if (Math.abs(dot(dir, new CANNON.Vec3(1, 0, 0))) > TRANSLATION_TOLERANCE) keyToThrusterIndices[dir.x > 0 ? CONTROL_COMMANDS.translatePositiveX : CONTROL_COMMANDS.translateNegativeX].push(i);
+      if (Math.abs(dot(dir, new CANNON.Vec3(0, 1, 0))) > TRANSLATION_TOLERANCE) keyToThrusterIndices[dir.y > 0 ? CONTROL_COMMANDS.translatePositiveY : CONTROL_COMMANDS.translateNegativeY].push(i);
 
       // Rotation: torque = r × F  (lever arm × direction)
       const lever = pos;
@@ -113,20 +115,20 @@ function processThrusterConfig(config, CANNON, satMesh, keyToThrusterIndices, cr
 
       // Pitch (rotation around X axis)
       if (Math.abs(torque.x) > 0.025) {
-        if (torque.x > 0) keyToThrusterIndices['k'].push(i); // pitch up
-        else keyToThrusterIndices['i'].push(i); // pitch down
+        if (torque.x > 0) keyToThrusterIndices[CONTROL_COMMANDS.pitchPositive].push(i); // pitch up
+        else keyToThrusterIndices[CONTROL_COMMANDS.pitchNegative].push(i); // pitch down
       }
 
       // Yaw (rotation around Y axis)
       if (Math.abs(torque.y) > 0.025) {
-        if (torque.y > 0) keyToThrusterIndices['j'].push(i); // yaw left
-        else keyToThrusterIndices['l'].push(i); // yaw right
+        if (torque.y > 0) keyToThrusterIndices[CONTROL_COMMANDS.yawPositive].push(i); // yaw left
+        else keyToThrusterIndices[CONTROL_COMMANDS.yawNegative].push(i); // yaw right
       }
 
       // Roll (rotation around Z axis)
       if (Math.abs(torque.z) > 0.025) {
-        if (torque.z > 0) keyToThrusterIndices['o'].push(i); // roll left
-        else keyToThrusterIndices['u'].push(i); // roll right
+        if (torque.z > 0) keyToThrusterIndices[CONTROL_COMMANDS.rollPositive].push(i); // roll left
+        else keyToThrusterIndices[CONTROL_COMMANDS.rollNegative].push(i); // roll right
       }
     } else {
       // Use custom keybinds from JSON

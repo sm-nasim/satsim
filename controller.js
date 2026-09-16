@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CONTROL_COMMAND_KEYS } from './controlBindings.js';
 
 const STARTER_CODE = `// ===== STUDENT AUTOPILOT CONTROLLER =====
 // This is just an example to get you started
@@ -268,11 +269,11 @@ export class StudentController {
     };
   }
 
-  // Keys the controller is allowed to "press." These are exactly the keys the
-  // keyboard uses to fire thrusters, so the controller drives the same
-  // (fuel-burning, thruster-activating) code path as a human pilot.
+  // Stable command tokens the controller is allowed to "press." Human keyboard
+  // bindings are translated to these same tokens, so remapping a physical key
+  // does not break existing student programs or bypass the normal fuel path.
   static get VALID_KEYS() {
-    return new Set(['w', 's', 'a', 'd', 'q', 'e', 'i', 'k', 'j', 'l', 'u', 'o']);
+    return new Set(CONTROL_COMMAND_KEYS);
   }
 
   // Run the student's control law for this frame. Instead of applying forces or
