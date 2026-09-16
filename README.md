@@ -1,11 +1,11 @@
 # Satellite Simulator Readme
 Here you will find the links to go to the satellite simulator:
 
-[Main Satellite Simulator](https://cghiuganiastate.github.io/satsim/)
+[Main Satellite Simulator](https://sm-nasim.github.io/satsim/)
 
 Here is the link to the spacecraft editor where you can setup your spacecraft:
 
-[Spacecraft Editor](https://cghiuganiastate.github.io/satsim/editor/)
+[Spacecraft Editor](https://sm-nasim.github.io/satsim/editor/)
 
 # User Guide
 ## Satellite Simulator
