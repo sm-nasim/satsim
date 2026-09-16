@@ -41,9 +41,11 @@ import {
   formatPhysicalKey,
   getCommandForPhysicalKey,
   getDefaultBindings,
+  isReservedPhysicalKey,
   loadBindings,
   normalizePhysicalKey,
-  saveBindings
+  saveBindings,
+  validateBindings
 } from './controlBindings.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
@@ -484,19 +486,30 @@ function initSimulation() {
     const openButton = document.getElementById('customize-controls-button');
     const closeButton = document.getElementById('close-controls-panel');
     const resetButton = document.getElementById('reset-controls-button');
+    const exportButton = document.getElementById('export-controls-button');
+    const importButton = document.getElementById('import-controls-button');
+    const importInput = document.getElementById('import-controls-file');
     const panel = document.getElementById('controls-panel');
-    if (!openButton || !closeButton || !resetButton || !panel) return;
+    const backdrop = document.getElementById('controls-backdrop');
+    if (!openButton || !closeButton || !resetButton || !exportButton || !importButton || !importInput || !panel || !backdrop) return;
+
+    const closePanel = () => {
+      pendingBindingActionId = null;
+      panel.style.display = 'none';
+      backdrop.style.display = 'none';
+      document.body.classList.remove('controls-modal-open');
+      renderControlsPanel();
+    };
 
     openButton.addEventListener('click', () => {
+      document.body.classList.add('controls-modal-open');
+      backdrop.style.display = 'block';
       panel.style.display = 'block';
       setControlsMessage('Click a key assignment to change it.');
       renderControlsPanel();
     });
-    closeButton.addEventListener('click', () => {
-      pendingBindingActionId = null;
-      panel.style.display = 'none';
-      renderControlsPanel();
-    });
+    closeButton.addEventListener('click', closePanel);
+    backdrop.addEventListener('click', closePanel);
     resetButton.addEventListener('click', () => {
       controlBindings = getDefaultBindings();
       pendingBindingActionId = null;
@@ -504,6 +517,59 @@ function initSimulation() {
       clearManualControlState();
       setControlsMessage('Controls reset to defaults.');
       renderControlsPanel();
+    });
+    exportButton.addEventListener('click', () => {
+      const exportData = Object.fromEntries(
+        CONTROL_ACTIONS.map(action => [action.id, controlBindings[action.id]])
+      );
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'satsim-controls.json';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setControlsMessage('Controls exported to satsim-controls.json.');
+    });
+    importButton.addEventListener('click', () => importInput.click());
+    importInput.addEventListener('change', event => {
+      const file = event.target.files[0];
+      event.target.value = '';
+      if (!file) return;
+      if (!file.name.toLowerCase().endsWith('.json')) {
+        setControlsMessage('Import failed: choose a .json controls file.', true);
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = loadEvent => {
+        try {
+          const importedData = JSON.parse(loadEvent.target.result);
+          const validation = validateBindings(importedData);
+          if (!validation.valid) {
+            setControlsMessage(`Import failed: ${validation.error}`, true);
+            return;
+          }
+
+          controlBindings = validation.bindings;
+          pendingBindingActionId = null;
+          clearManualControlState();
+          const saved = saveBindings(controlBindings);
+          renderControlsPanel();
+          setControlsMessage(
+            saved
+              ? `Controls imported from ${file.name}.`
+              : 'Controls were imported, but the browser could not save them.',
+            !saved
+          );
+        } catch (error) {
+          setControlsMessage(`Import failed: ${file.name} is not valid JSON.`, true);
+        }
+      };
+      reader.onerror = () => setControlsMessage(`Import failed: ${file.name} could not be read.`, true);
+      reader.readAsText(file);
     });
 
     renderControlsPanel();
@@ -522,8 +588,7 @@ function initSimulation() {
       return true;
     }
 
-    const disallowedKeys = new Set(['`', ' ', 'capslock', 'shift', 'control', 'alt', 'meta', 'c', 't', 'v']);
-    if (!physicalKey || disallowedKeys.has(physicalKey)) {
+    if (!physicalKey || isReservedPhysicalKey(physicalKey)) {
       setControlsMessage(`${formatPhysicalKey(physicalKey)} is reserved by the simulator. Choose another key.`, true);
       pendingBindingActionId = null;
       renderControlsPanel();

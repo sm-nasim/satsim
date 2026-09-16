@@ -31,6 +31,9 @@ export const TRANSLATION_COMMAND_KEYS = Object.freeze(
 );
 
 const STORAGE_KEY = 'satsim-control-bindings-v1';
+const RESERVED_PHYSICAL_KEYS = new Set([
+  '`', ' ', 'capslock', 'shift', 'control', 'alt', 'meta', 'c', 't', 'v'
+]);
 
 export function normalizePhysicalKey(key) {
   return typeof key === 'string' ? key.toLowerCase() : '';
@@ -57,26 +60,49 @@ export function getDefaultBindings() {
   return Object.fromEntries(CONTROL_ACTIONS.map(action => [action.id, action.defaultKey]));
 }
 
-function isValidStoredBindings(candidate) {
-  if (!candidate || typeof candidate !== 'object') return false;
+export function isReservedPhysicalKey(key) {
+  return RESERVED_PHYSICAL_KEYS.has(normalizePhysicalKey(key));
+}
 
-  const values = [];
-  for (const action of CONTROL_ACTIONS) {
-    const key = normalizePhysicalKey(candidate[action.id]);
-    if (!key) return false;
-    values.push(key);
+export function validateBindings(candidate) {
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    return { valid: false, error: 'Controls JSON must be an object containing keyboard bindings.' };
   }
-  return new Set(values).size === values.length;
+
+  const normalizedBindings = {};
+  const usedKeys = new Map();
+  for (const action of CONTROL_ACTIONS) {
+    if (!Object.prototype.hasOwnProperty.call(candidate, action.id)) {
+      return { valid: false, error: `Missing required control: ${action.label}.` };
+    }
+
+    const rawKey = candidate[action.id];
+    if (typeof rawKey !== 'string' || !rawKey || rawKey !== rawKey.trim()) {
+      return { valid: false, error: `The key for ${action.label} must be a non-empty string without surrounding whitespace.` };
+    }
+
+    const key = normalizePhysicalKey(rawKey);
+    if (isReservedPhysicalKey(key)) {
+      return { valid: false, error: `${formatPhysicalKey(key)} is reserved by the simulator and cannot be assigned to ${action.label}.` };
+    }
+
+    const duplicateAction = usedKeys.get(key);
+    if (duplicateAction) {
+      return { valid: false, error: `${formatPhysicalKey(key)} is assigned to both ${duplicateAction.label} and ${action.label}.` };
+    }
+
+    normalizedBindings[action.id] = key;
+    usedKeys.set(key, action);
+  }
+
+  return { valid: true, bindings: normalizedBindings };
 }
 
 export function loadBindings() {
   try {
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (isValidStoredBindings(stored)) {
-      return Object.fromEntries(
-        CONTROL_ACTIONS.map(action => [action.id, normalizePhysicalKey(stored[action.id])])
-      );
-    }
+    const validation = validateBindings(stored);
+    if (validation.valid) return validation.bindings;
   } catch (error) {
     console.warn('Unable to load saved keyboard controls:', error);
   }
