@@ -13,6 +13,63 @@ const CENTER_SPACECRAFT_MODEL = false;
 let spacecraftGroup = null;
 let spacecraftBoundingBoxMesh = null;
 let spacecraftBody = null;
+let collisionDebug = null;
+let collisionDebugVisible = false;
+
+// Green triangles describe the visual box; magenta edges are read from Cannon.
+// The latter lives in world space so it independently verifies the body transform.
+function installCollisionDebug(model, group, body, scene, box) {
+  if (collisionDebug) {
+    scene.remove(collisionDebug.physics);
+    collisionDebug.physics.geometry.dispose();
+    collisionDebug.physics.material.dispose();
+  }
+  const size = box.getSize(new THREE.Vector3());
+  spacecraftBoundingBoxMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(size.x, size.y, size.z),
+    new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true, depthTest: false,
+      transparent: true, opacity: 0.5 })
+  );
+  spacecraftBoundingBoxMesh.position.copy(box.getCenter(new THREE.Vector3()));
+  group.add(spacecraftBoundingBoxMesh);
+  const physics = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(2, 2, 2)),
+    new THREE.LineBasicMaterial({ color: 0xff00ff, depthTest: false })
+  );
+  physics.renderOrder = 1000;
+  scene.add(physics);
+  collisionDebug = { model, group, body, box, physics };
+  spacecraftBoundingBoxMesh.visible = physics.visible = collisionDebugVisible;
+  updateCollisionDebug();
+}
+
+function updateCollisionDebug() {
+  if (!collisionDebug) return;
+  const { body, physics } = collisionDebug;
+  const center = body.pointToWorldFrame(body.shapeOffsets[0]);
+  physics.position.copy(center);
+  physics.quaternion.copy(body.quaternion.mult(body.shapeOrientations[0]));
+  physics.scale.copy(body.shapes[0].halfExtents);
+}
+
+function logCollisionDebug() {
+  if (!collisionDebug) return;
+  const { model, group, body, box } = collisionDebug;
+  group.updateWorldMatrix(true, true);
+  console.log('Spacecraft collision transforms (bbox in body-local coordinates)', {
+    modelScale: model.scale.toArray(), modelPosition: model.position.toArray(),
+    modelQuaternion: model.quaternion.toArray(),
+    visualBBoxMin: box.min.toArray(), visualBBoxMax: box.max.toArray(),
+    visualBBoxCenter: box.getCenter(new THREE.Vector3()).toArray(),
+    visualBBoxSize: box.getSize(new THREE.Vector3()).toArray(),
+    visualCollisionCenterWorld: spacecraftBoundingBoxMesh.getWorldPosition(new THREE.Vector3()).toArray(),
+    physicsBodyPosition: body.position.toArray(), physicsBodyQuaternion: body.quaternion.toArray(),
+    physicsShapeHalfExtents: body.shapes[0].halfExtents.toArray(),
+    physicsShapeLocalOffset: body.shapeOffsets[0].toArray(),
+    physicsCollisionCenterWorld: body.pointToWorldFrame(body.shapeOffsets[0]).toArray(),
+    CG: body.centerOfMassOffset?.toArray() || [0, 0, 0]
+  });
+}
 
 // Fuel system variables - SINGLE SOURCE OF TRUTH
 let dryMass = 5;
@@ -83,18 +140,18 @@ function processLoadedModel(model, rotation, centroidModel, properties, scene, w
     }
   }
 
-  // 2. Calculate bounding box of the ROTATED model
+  // Measure before parenting: model.matrixWorld is spacecraft/body-local here.
+  // setFromObject includes model position, quaternion, scale and child transforms.
+  // STL exported by the editor already has scale and CG translation baked in.
+  model.updateWorldMatrix(true, true);
   const box = new THREE.Box3().setFromObject(model);
-  const size = box.getSize(new THREE.Vector3());
-  const center = box.getCenter(new THREE.Vector3());
-  let collisionBoxOffset = new THREE.Vector3(0, 0, 0);
-
-  // 3. Center the model if centering is enabled (use flag at top of file)
   if (CENTER_SPACECRAFT_MODEL) {
-    model.position.sub(center);
-  } else {
-    collisionBoxOffset.copy(center);
+    model.position.sub(box.getCenter(new THREE.Vector3()));
+    model.updateWorldMatrix(true, true);
+    box.setFromObject(model);
   }
+  const size = box.getSize(new THREE.Vector3());
+  const collisionBoxOffset = box.getCenter(new THREE.Vector3());
 
   // Add the model to the main group and enable shadows
   spacecraftGroup.add(model);
@@ -140,16 +197,12 @@ function processLoadedModel(model, rotation, centroidModel, properties, scene, w
       )
     : new CANNON.Vec3(0, 0, 0);
   
-  // Calculate final shape offset: centroid offset + centerOfMass offset
-  const finalShapeOffset = new CANNON.Vec3(
-    collisionBoxOffset.x + centerOfMassOffset.x,
-    collisionBoxOffset.y + centerOfMassOffset.y,
-    collisionBoxOffset.z + centerOfMassOffset.z
-  );
-  
-  // Add the shape with the combined offset
-  spacecraftBody.addShape(shape, finalShapeOffset);
-  
+  // The group origin tracks body.position. The visual box center is already
+  // relative to that origin; CG is metadata, not an additional shape translation.
+  spacecraftBody.addShape(shape, new CANNON.Vec3(
+    collisionBoxOffset.x, collisionBoxOffset.y, collisionBoxOffset.z
+  ));
+
   // Store centerOfMass for other systems to use
   spacecraftBody.centerOfMassOffset = centerOfMassOffset;
   
@@ -193,27 +246,7 @@ function processLoadedModel(model, rotation, centroidModel, properties, scene, w
   spacecraftBody.position.copy(spacecraftGroup.position);
   world.addBody(spacecraftBody);
 
-  // Create visual bounding box that matches the rotated model
-  const boxGeometry = new THREE.BoxGeometry(size.x, size.y, size.z);
-  const boxMaterial = new THREE.MeshBasicMaterial({
-    color: 0x00ff00,
-    transparent: true,
-    opacity: 0.2,
-    wireframe: true
-  });
-  spacecraftBoundingBoxMesh = new THREE.Mesh(boxGeometry, boxMaterial);
-  spacecraftBoundingBoxMesh.visible = false;
-  
-  // Position the visual bounding box with the same offset
-  spacecraftBoundingBoxMesh.position.copy(collisionBoxOffset);
-  
-  spacecraftGroup.add(spacecraftBoundingBoxMesh);
-  
-  // Disable shadows on wireframe bounding box (it's just a visual aid)
-  if (spacecraftBoundingBoxMesh.isMesh) {
-    spacecraftBoundingBoxMesh.castShadow = false;
-    spacecraftBoundingBoxMesh.receiveShadow = false;
-  }
+  installCollisionDebug(model, spacecraftGroup, spacecraftBody, scene, box);
 
   // Add axes helper to the group
   const satAxes = new THREE.AxesHelper(2);
@@ -221,10 +254,16 @@ function processLoadedModel(model, rotation, centroidModel, properties, scene, w
 
   // Call the callback with the spacecraft body and the main group
   if (onLoaded) onLoaded(spacecraftBody, spacecraftGroup);
+  updateCollisionDebug();
+  logCollisionDebug();
 }
 
 // Toggle visibility of the spacecraft bounding box
 export function toggleSpacecraftBoundingBoxVisibility(visible) {
+  collisionDebugVisible = visible;
+  updateCollisionDebug();
+  if (collisionDebug) collisionDebug.physics.visible = visible;
+  if (visible) logCollisionDebug();
   if (spacecraftBoundingBoxMesh) {
     spacecraftBoundingBoxMesh.visible = visible;
   }
@@ -246,6 +285,7 @@ export function updateSpacecraft() {
     spacecraftGroup.position.copy(spacecraftBody.position);
     spacecraftGroup.quaternion.copy(spacecraftBody.quaternion);
   }
+  updateCollisionDebug();
 }
 
 // Function to update satellite mass based on fuel
@@ -383,5 +423,8 @@ export function initializeDefaultSpacecraft(scene, world, properties = null) {
   const satAxes = new THREE.AxesHelper(2);
   satMesh.add(satAxes);
 
+  // Preserve the default physics dimensions (half extents 1) in its debug box.
+  installCollisionDebug(satMesh, satMesh, satBody, scene,
+    new THREE.Box3(new THREE.Vector3(-1, -1, -1), new THREE.Vector3(1, 1, 1)));
   return { satBody, satMesh };
 }
