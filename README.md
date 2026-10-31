@@ -1,6 +1,6 @@
 <div align="center">
 
-# SatSim
+# SatSim - Iowa State University
 
 **Six-Degree-of-Freedom Spacecraft Simulator**
 
