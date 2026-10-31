@@ -120,18 +120,6 @@ Thruster key assignments in the editor refer to internal control commands. Physi
 - Reaction-wheel positions currently do not affect the simulation.
 - Nonorthogonal reaction-wheel layouts, configurations with more than three wheels, and multiple-CMG configurations require further validation.
 
-## Run Locally
-
-Clone the repository and start a local HTTP server with Python 3:
-
-```bash
-git clone https://github.com/sm-nasim/satsim.git
-cd satsim
-python3 -m http.server 8000 --bind 127.0.0.1
-```
-
-Open the [local simulator](http://localhost:8000/) or [local editor](http://localhost:8000/editor/). Internet access is required for externally hosted JavaScript dependencies and remote assets. Stop the server with **Ctrl + C**.
-
 ## Troubleshooting
 
 | Issue | Suggested action |
