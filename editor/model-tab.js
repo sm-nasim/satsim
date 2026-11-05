@@ -89,7 +89,9 @@ export class ModelTab extends FeatureManager {
         // 2. Apply each transformation in sequence
         this.features.forEach(feature => {
             if (feature.type === 'rotation') {
-                const axis = new THREE.Vector3(feature.axis.x, feature.axis.y, feature.axis.z).normalize();
+                const axis = new THREE.Vector3(feature.axis.x, feature.axis.y, feature.axis.z);
+                if (axis.lengthSq() === 0) return; // An unset axis has no rotation.
+                axis.normalize();
                 const angle = THREE.MathUtils.degToRad(feature.angle);
                 const rotation = new THREE.Quaternion().setFromAxisAngle(axis, angle);
                 this.model.quaternion.multiply(rotation);
@@ -242,7 +244,9 @@ export class ModelTab extends FeatureManager {
             if (feature.type === 'translation') {
                 this.initialPosition.sub(new THREE.Vector3(feature.vector.x, feature.vector.y, feature.vector.z));
             } else if (feature.type === 'rotation') {
-                const axis = new THREE.Vector3(feature.axis.x, feature.axis.y, feature.axis.z).normalize();
+                const axis = new THREE.Vector3(feature.axis.x, feature.axis.y, feature.axis.z);
+                if (axis.lengthSq() === 0) continue;
+                axis.normalize();
                 featureRotation.multiply(new THREE.Quaternion().setFromAxisAngle(axis, THREE.MathUtils.degToRad(feature.angle)));
             }
         }
