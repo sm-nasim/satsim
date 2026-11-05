@@ -7,6 +7,7 @@ const DEFAULT_MODEL_PATH = 'navion.stl';
 // Helper function to normalize configuration to unified format
 export function normalizeConfiguration(config) {
   const normalized = {
+    editorFormatVersion: config.editorFormatVersion,
     spacecraftProperties: config.spacecraftProperties || { dryMass: 5, fuelMass: 5, maxFuelMass: 5, inertia: { x: 3, y: 3, z: 3 } },
     cameras: Array.isArray(config.cameras) ? config.cameras : (config.cameras?.cameras || []),
     cmg: { cmgs: Array.isArray(config.cmg) ? config.cmg : (config.cmg?.cmgs || []) },

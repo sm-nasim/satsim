@@ -124,6 +124,19 @@ export function loadSpacecraft(file, scene, world, rotation, centroidModel, prop
 
 // This function handles the common logic after a model (GLB or STL) is loaded
 function processLoadedModel(model, rotation, centroidModel, properties, scene, world, onLoaded) {
+  // New editor configs describe the transform of the original/source STL.
+  // Legacy configs expect an already-transformed STL and skip this block.
+  const transform = properties.sourceModelTransform;
+  if (transform) {
+    const p = transform.position || { x: 0, y: 0, z: 0 };
+    const q = transform.quaternion || { x: 0, y: 0, z: 0, w: 1 };
+    const scale = transform.scale || { x: 1, y: 1, z: 1 };
+    const cg = properties.centerOfMass || { x: 0, y: 0, z: 0 };
+    model.position.set(p.x - (cg.x || 0), p.y - (cg.y || 0), p.z - (cg.z || 0));
+    model.quaternion.set(q.x, q.y, q.z, q.w).normalize();
+    model.scale.set(scale.x, scale.y, scale.z);
+  }
+
   // 1. Apply successive rotations FIRST
   if (rotation) {
     if (rotation.x !== 0) {

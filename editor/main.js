@@ -10,6 +10,7 @@ import { ThrustersTab } from './thrusters-tab.js';
 import { CamerasTab } from './cameras-tab.js';
 import { AttitudeTab } from './attitude-tab.js';
 import { LightsTab } from './lights-tab.js';
+import { importEditorConfiguration, exportEditorConfiguration } from './configuration-format.js';
 
 // Global variables
 let scene, camera, renderer, controls;
@@ -18,7 +19,7 @@ let cgVisualizer; // NEW: Global variable for the CG visualizer sphere
 let axisLabels = []; // Store axis labels for cleanup
 
 // MODIFIED: Updated spacecraftData to include the new centerOfMass structure
-let spacecraftData = {
+const spacecraftData = {
     "cameras": {
         "cameras": []
     },
@@ -291,54 +292,9 @@ function setupEventListeners() {
             try {
                 let importedData = JSON.parse(event.target.result);
                 
-                // Transform the imported data to match our internal structure
-                // Convert direct arrays back to nested objects
-                const transformedData = {
-                    spacecraftProperties: importedData.spacecraftProperties,
-                    model: importedData.model || { position: { x: 0, y: 0, z: 0 }, quaternion: { x: 0, y: 0, z: 0, w: 1 }, features: [] },
-                    cameras: {
-                        cameras: importedData.cameras || []
-                    },
-                    cmg: {
-                        cmgs: importedData.cmg?.cmgs || []
-                    },
-                    lamps: {
-                        lamps: importedData.lamps || []
-                    },
-                    reactionwheels: {
-                        wheels: importedData.reactionwheels || []
-                    },
-                    thrusters: {
-                        thrusters: importedData.thrusters || []
-                    }
-                };
-                
-                // The centerOfMass field in the file is our offset metadata.
-                const cgOffset = transformedData.spacecraftProperties.centerOfMass || { x: 0, y: 0, z: 0 };
-                
-                // If the offset is not zero, we need to restore the original positions.
-                if (cgOffset.x !== 0 || cgOffset.y !== 0 || cgOffset.z !== 0) {
-                    
-                    // Function to restore positions by adding the offset back
-                    function restorePosition(position) {
-                        if (!position) return;
-                        position.x += cgOffset.x;
-                        position.y += cgOffset.y;
-                        position.z += cgOffset.z;
-                    }
-                    
-                    // Restore all positions to their original editor coordinates
-                    if (transformedData.model?.position) restorePosition(transformedData.model.position);
-                    transformedData.thrusters?.thrusters?.forEach(t => restorePosition(t.position));
-                    transformedData.cameras?.cameras?.forEach(c => restorePosition(c.position));
-                    transformedData.cmg?.cmgs?.forEach(c => restorePosition(c.position));
-                    transformedData.reactionwheels?.wheels?.forEach(w => restorePosition(w.position));
-                    transformedData.lamps?.lamps?.forEach(l => restorePosition(l.position));
-                }
-                
-                // Update the main spacecraft data object with the transformed data
-                spacecraftData = transformedData;
-                
+                const transformedData = importEditorConfiguration(importedData);
+                Object.assign(spacecraftData, transformedData);
+
                 // Update all UI elements with the transformed data
                 const props = spacecraftData.spacecraftProperties;
                 document.getElementById('spacecraft-name').value = props.name;
@@ -358,6 +314,11 @@ function setupEventListeners() {
                 
                 // Reload all tabs
                 modelTab.loadFromData(spacecraftData);
+                if (spacecraftData.model.scale) {
+                    const scale = spacecraftData.model.scale.x;
+                    document.getElementById('enable-scale').checked = scale !== 1;
+                    document.getElementById('model-scale').value = scale;
+                }
                 thrustersTab.loadFromData(spacecraftData);
                 camerasTab.loadFromData(spacecraftData);
                 attitudeTab.loadFromData(spacecraftData);
@@ -514,6 +475,7 @@ function setupEventListeners() {
         }
         
         spacecraftModel.updateMatrixWorld();
+        if (modelTab.model === spacecraftModel) modelTab.updateSpacecraftData();
     }
     
     enableScaleCheckbox.addEventListener('change', applyScaleToModel);
@@ -531,64 +493,14 @@ function setupEventListeners() {
         spacecraftData.spacecraftProperties.inertia.y = parseFloat(document.getElementById('inertia-yy').value);
         spacecraftData.spacecraftProperties.inertia.z = parseFloat(document.getElementById('inertia-zz').value);
         
-        // DEBUG: Print spacecraftData.cmg before export
-        console.log('DEBUG: spacecraftData.cmg before export:', JSON.stringify(spacecraftData.cmg, null, 2));
-        
-        // Get the current CG values from the UI. This is our offset.
-        const cgX = parseFloat(document.getElementById('cg-x').value) || 0;
-        const cgY = parseFloat(document.getElementById('cg-y').value) || 0;
-        const cgZ = parseFloat(document.getElementById('cg-z').value) || 0;
-        
-        // DEBUG: Log spacecraftData state before export
-        console.log('DEBUG: spacecraftData BEFORE deep copy:', JSON.stringify(spacecraftData, null, 2));
-        console.log('DEBUG: spacecraftData.cmg.cmgs length:', spacecraftData.cmg?.cmgs?.length || 0);
-        
-        // Create a deep copy for exporting
-        const exportData = JSON.parse(JSON.stringify(spacecraftData));
-        
-        // DEBUG: Print exportData.cmg after deep copy
-        console.log('DEBUG: exportData.cmg after deep copy:', JSON.stringify(exportData.cmg, null, 2));
-        console.log('DEBUG: exportData.cmg.cmgs length:', exportData.cmg?.cmgs?.length || 0);
-        
-        // DO NOT modify the centerOfMass field. It serves as metadata for re-importing.
-        
-        // Function to offset positions by the negative of the CG
-        function offsetPosition(position) {
-            if (!position) return;
-            position.x -= cgX;
-            position.y -= cgY;
-            position.z -= cgZ;
-        }
-        
-        // Offset all component positions in the export data
-        if (exportData.model?.position) offsetPosition(exportData.model.position);
-        exportData.thrusters?.thrusters?.forEach(t => offsetPosition(t.position));
-        exportData.cameras?.cameras?.forEach(c => offsetPosition(c.position));
-        
-        // Handle CMG: CMGs are in array format and don't have position
-        // Note: Simplified CMG format doesn't have position, so no offset needed
-        console.log('DEBUG: Exporting CMG array with length:', exportData.cmg?.cmgs?.length || 0);
-        
-        exportData.reactionwheels?.wheels?.forEach(w => offsetPosition(w.position));
-        exportData.lamps?.lamps?.forEach(l => offsetPosition(l.position));
-        
-        // Create a new object with the structure expected by the validation function
-        // CORRECTED: Explicitly include the model and its features
-        const formattedExportData = {
-            spacecraftProperties: exportData.spacecraftProperties,
-            model: exportData.model, // This now correctly includes the features
-            // Transform nested arrays to direct arrays as expected by validation
-            cameras: exportData.cameras?.cameras || [],
-            // Handle CMG: export as array format
-            cmg: { cmgs: exportData.cmg?.cmgs || [] },
-            lamps: exportData.lamps?.lamps || [],
-            reactionwheels: exportData.reactionwheels?.wheels || [],
-            thrusters: exportData.thrusters?.thrusters || []
+        spacecraftData.spacecraftProperties.centerOfMass = {
+            x: parseFloat(document.getElementById('cg-x').value) || 0,
+            y: parseFloat(document.getElementById('cg-y').value) || 0,
+            z: parseFloat(document.getElementById('cg-z').value) || 0
         };
-        
-        // DEBUG: Print formattedExportData.cmg after formatting
-        console.log('DEBUG: formattedExportData.cmg after formatting:', JSON.stringify(formattedExportData.cmg, null, 2));
-        
+        modelTab.updateSpacecraftData();
+        const formattedExportData = exportEditorConfiguration(spacecraftData);
+
         // Export as JSON
         const dataStr = JSON.stringify(formattedExportData, null, 2);
         const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
@@ -608,31 +520,25 @@ function setupEventListeners() {
             return;
         }
 
-        // Get the current CG values from the UI. This is our offset.
-        const cgOffset = new THREE.Vector3(
-            parseFloat(document.getElementById('cg-x').value) || 0,
-            parseFloat(document.getElementById('cg-y').value) || 0,
-            parseFloat(document.getElementById('cg-z').value) || 0
-        );
-        
-        // Save the original position of the model
+        // Match v2 configs: output source geometry with no root transform.
+        // Nested mesh transforms remain baked by STLExporter for GLTF models.
         const originalPosition = spacecraftModel.position.clone();
-        
-        // CORRECTED: Temporarily move the model by offsetting it from its current position.
-        // This correctly accounts for any manual positioning of the model in the editor.
-        spacecraftModel.position.sub(cgOffset);
-        
-        // Update the scene matrix world to reflect the change before exporting
-        spacecraftModel.updateMatrixWorld();
-        
-        // Create the exporter and parse the model
-        const exporter = new STLExporter();
-        const stlString = exporter.parse(spacecraftModel);
-        
-        // Restore the model's original position
-        spacecraftModel.position.copy(originalPosition);
-        spacecraftModel.updateMatrixWorld();
-        
+        const originalQuaternion = spacecraftModel.quaternion.clone();
+        const originalScale = spacecraftModel.scale.clone();
+        let stlString;
+        try {
+            spacecraftModel.position.set(0, 0, 0);
+            spacecraftModel.quaternion.identity();
+            spacecraftModel.scale.set(1, 1, 1);
+            spacecraftModel.updateMatrixWorld(true);
+            stlString = new STLExporter().parse(spacecraftModel);
+        } finally {
+            spacecraftModel.position.copy(originalPosition);
+            spacecraftModel.quaternion.copy(originalQuaternion);
+            spacecraftModel.scale.copy(originalScale);
+            spacecraftModel.updateMatrixWorld(true);
+        }
+
         // Create a blob from the STL string
         const blob = new Blob([stlString], { type: 'text/plain' });
         
@@ -661,54 +567,9 @@ function setupEventListeners() {
                     try {
                         let importedData = JSON.parse(e.target.result);
                         
-                        // Transform the imported data to match our internal structure
-                        // Convert direct arrays back to nested objects
-                        const transformedData = {
-                            spacecraftProperties: importedData.spacecraftProperties,
-                            model: importedData.model || { position: { x: 0, y: 0, z: 0 }, quaternion: { x: 0, y: 0, z: 0, w: 1 }, features: [] },
-                            cameras: {
-                                cameras: importedData.cameras || []
-                            },
-                            cmg: {
-                                cmgs: importedData.cmg?.cmgs || []
-                            },
-                            lamps: {
-                                lamps: importedData.lamps || []
-                            },
-                            reactionwheels: {
-                                wheels: importedData.reactionwheels || []
-                            },
-                            thrusters: {
-                                thrusters: importedData.thrusters || []
-                            }
-                        };
-                        
-                        // The centerOfMass field in the file is our offset metadata.
-                        const cgOffset = transformedData.spacecraftProperties.centerOfMass || { x: 0, y: 0, z: 0 };
-                        
-                        // If the offset is not zero, we need to restore the original positions.
-                        if (cgOffset.x !== 0 || cgOffset.y !== 0 || cgOffset.z !== 0) {
-                            
-                            // Function to restore positions by adding the offset back
-                            function restorePosition(position) {
-                                if (!position) return;
-                                position.x += cgOffset.x;
-                                position.y += cgOffset.y;
-                                position.z += cgOffset.z;
-                            }
-                            
-                            // Restore all positions to their original editor coordinates
-                            if (transformedData.model?.position) restorePosition(transformedData.model.position);
-                            transformedData.thrusters?.thrusters?.forEach(t => restorePosition(t.position));
-                            transformedData.cameras?.cameras?.forEach(c => restorePosition(c.position));
-                            transformedData.cmg?.cmgs?.forEach(c => restorePosition(c.position));
-                            transformedData.reactionwheels?.wheels?.forEach(w => restorePosition(w.position));
-                            transformedData.lamps?.lamps?.forEach(l => restorePosition(l.position));
-                        }
-                        
-                        // Update the main spacecraft data object with the transformed data
-                        spacecraftData = transformedData;
-                        
+                        const transformedData = importEditorConfiguration(importedData);
+                        Object.assign(spacecraftData, transformedData);
+
                         // Update all UI elements with the transformed data
                         const props = spacecraftData.spacecraftProperties;
                         document.getElementById('spacecraft-name').value = props.name;
@@ -716,9 +577,9 @@ function setupEventListeners() {
                         document.getElementById('dry-mass').value = props.dryMass;
                         document.getElementById('fuel-mass').value = props.fuelMass;
                         document.getElementById('max-fuel-mass').value = props.maxFuelMass;
-        document.getElementById('inertia-xx').value = props.inertia.x;
-        document.getElementById('inertia-yy').value = props.inertia.y;
-        document.getElementById('inertia-zz').value = props.inertia.z;
+                        document.getElementById('inertia-xx').value = props.inertia.x;
+                        document.getElementById('inertia-yy').value = props.inertia.y;
+                        document.getElementById('inertia-zz').value = props.inertia.z;
                         
                         const cg = props.centerOfMass || { x: 0, y: 0, z: 0 };
                         document.getElementById('cg-x').value = cg.x;
@@ -728,6 +589,11 @@ function setupEventListeners() {
                         
                         // Reload all tabs
                         modelTab.loadFromData(spacecraftData);
+                        if (spacecraftData.model.scale) {
+                            const scale = spacecraftData.model.scale.x;
+                            document.getElementById('enable-scale').checked = scale !== 1;
+                            document.getElementById('model-scale').value = scale;
+                        }
                         thrustersTab.loadFromData(spacecraftData);
                         camerasTab.loadFromData(spacecraftData);
                         attitudeTab.loadFromData(spacecraftData);

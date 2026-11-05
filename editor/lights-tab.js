@@ -336,6 +336,18 @@ export class LightsTab extends FeatureManager {
      * Loads light configurations from the main spacecraft data object.
      * @param {object} spacecraftData - The main data object.
      */
+    clearFeatures() {
+        // These visuals are records, not Object3Ds; the generic remover leaves
+        // old lights and targets behind when a configuration is re-imported.
+        this.visuals.forEach(({ light, helper }) => {
+            this.scene.remove(light, light.target, helper);
+            helper.dispose();
+            light.dispose();
+        });
+        this.features = [];
+        this.visuals = [];
+    }
+
     loadFromData(spacecraftData) {
         this.clearFeatures();
         

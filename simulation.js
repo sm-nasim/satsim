@@ -170,7 +170,11 @@ function initSimulation() {
 
     const rotation = { x: 0, y: 0, z: 0 };
 
-    loadSpacecraft(modelFile, scene, world, rotation, centroidModel, config.spacecraftProperties, (body, mesh) => {
+    const modelProperties = { ...config.spacecraftProperties };
+    if (config.editorFormatVersion === 2 && config.model?.geometryFrame === 'source') {
+      modelProperties.sourceModelTransform = config.model;
+    }
+    loadSpacecraft(modelFile, scene, world, rotation, centroidModel, modelProperties, (body, mesh) => {
       satBody = body;
       satMesh = mesh;
       

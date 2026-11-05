@@ -11,6 +11,7 @@ export class ModelTab extends FeatureManager {
         // Store the initial state of the model
         this.initialPosition = new THREE.Vector3();
         this.initialQuaternion = new THREE.Quaternion();
+        this.importedModelState = null;
         
         // Setup event listeners for this tab
         this.setupEventListeners();
@@ -31,6 +32,7 @@ export class ModelTab extends FeatureManager {
         // We no longer clear the features when a new model is loaded.
         // This allows existing transformations to be applied to the new model.
         
+        if (this.importedModelState) this.restoreModelState(this.importedModelState);
         this.updateSpacecraftData();
         this.updateFeaturesList();
     }
@@ -100,8 +102,14 @@ export class ModelTab extends FeatureManager {
         this.spacecraftData.model = {
             position: { x: this.model.position.x, y: this.model.position.y, z: this.model.position.z },
             quaternion: { x: this.model.quaternion.x, y: this.model.quaternion.y, z: this.model.quaternion.z, w: this.model.quaternion.w },
+            scale: { x: this.model.scale.x, y: this.model.scale.y, z: this.model.scale.z },
+            basePosition: { x: this.initialPosition.x, y: this.initialPosition.y, z: this.initialPosition.z },
+            baseQuaternion: { x: this.initialQuaternion.x, y: this.initialQuaternion.y, z: this.initialQuaternion.z, w: this.initialQuaternion.w },
             features: this.features
         };
+        if (this.importedModelState) {
+            this.importedModelState = JSON.parse(JSON.stringify(this.spacecraftData.model));
+        }
     }
     
     // --- OVERRIDDEN METHODS TO ENSURE CORRECT BEHAVIOR ---
@@ -225,14 +233,33 @@ export class ModelTab extends FeatureManager {
         window.modelTab = this;
     }
 
-    loadFromData(spacecraftData) {
-        if (spacecraftData.model && spacecraftData.model.features) {
-            this.features = spacecraftData.model.features;
-            if (this.features.length > 0) {
-                this.featureIdCounter = Math.max(...this.features.map(f => f.id || 0)) + 1;
+    restoreModelState(state) {
+        const position = state.position || { x: 0, y: 0, z: 0 };
+        const quaternion = state.quaternion || { x: 0, y: 0, z: 0, w: 1 };
+        this.initialPosition.set(position.x, position.y, position.z);
+        const featureRotation = new THREE.Quaternion();
+        for (const feature of this.features) {
+            if (feature.type === 'translation') {
+                this.initialPosition.sub(new THREE.Vector3(feature.vector.x, feature.vector.y, feature.vector.z));
+            } else if (feature.type === 'rotation') {
+                const axis = new THREE.Vector3(feature.axis.x, feature.axis.y, feature.axis.z).normalize();
+                featureRotation.multiply(new THREE.Quaternion().setFromAxisAngle(axis, THREE.MathUtils.degToRad(feature.angle)));
             }
-            this.updateSpacecraftData();
-            this.updateFeaturesList();
         }
+        this.initialQuaternion.set(quaternion.x, quaternion.y, quaternion.z, quaternion.w)
+            .multiply(featureRotation.invert());
+        if (state.basePosition) this.initialPosition.copy(state.basePosition);
+        if (state.baseQuaternion) this.initialQuaternion.copy(state.baseQuaternion);
+        if (this.model && state.scale) this.model.scale.copy(state.scale);
+    }
+
+    loadFromData(spacecraftData) {
+        if (!spacecraftData.model) return;
+        this.importedModelState = JSON.parse(JSON.stringify(spacecraftData.model));
+        this.features = this.importedModelState.features || [];
+        this.featureIdCounter = this.features.length ? Math.max(...this.features.map(f => f.id || 0)) + 1 : 0;
+        this.restoreModelState(this.importedModelState);
+        this.updateSpacecraftData();
+        this.updateFeaturesList();
     }
 }

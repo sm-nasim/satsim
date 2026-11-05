@@ -110,7 +110,9 @@ Import a saved configuration to continue editing later. In the editor, left-drag
 
 ### Scale and Coordinate Consistency
 
-The editor's STL export includes the model's applied scale and CG translation. Keep the exported model and its matching configuration together, and avoid applying the same unit conversion again after export.
+New editor exports store model scale, position, and rotation in the JSON configuration. Load that config with the original CAD STL (or the editor's new source-geometry STL export). The simulator applies the model transform and CG translation once; component positions receive the same CG translation. Keep the original CAD as the editor source when revising a design.
+
+Older configurations without `editorFormatVersion: 2` retain the previous workflow and require their matching transformed, CG-shifted STL. To migrate, load the exact STL/config pair that already works in the simulator into the updated editor. Legacy import treats that STL as simulator-ready geometry, leaves component coordinates unchanged, and positions the model at +CG so relative placement matches the simulator. Old model-feature history is retained as metadata rather than applied again. Export a new config and source model together for subsequent editing. Previously exported STLs with transforms baked into their vertices must not be paired with a new source-geometry config.
 
 Thruster key assignments in the editor refer to internal control commands. Physical keyboard remapping is managed separately through **Customize Controls** in the simulator.
 
